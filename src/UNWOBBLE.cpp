@@ -4,7 +4,7 @@
 #include <Wire.h>
 #include <math.h>
 #include <cmath>
-#include "PID.h"
+#include "Classes.h"
 
 #define SPR 200
 #define dirPinR 12
@@ -42,11 +42,11 @@ TaskHandle_t Task2;
 volatile double angle_acc_d = 0;
 
 /* To bias the gyro scope */
-dir bias_gyro(Adafruit_MPU6050 & mpu){
+dir bias_gyro(Adafruit_MPU6050 * mpu){
   sensors_event_t a, g, temp;
   dir store = {0,0,0};
   for(int i=0;i<100;i++){
-    mpu.getEvent(&a, &g, &temp);
+    (*mpu).getEvent(&a, &g, &temp);
     store.x = g.gyro.x;
     store.y = g.gyro.y;
     store.z = g.gyro.z;
@@ -82,6 +82,7 @@ void core0( void * pvParameters ){
 
   PID angle_rate_controller(24.3136228259616,44.265308660561,0.048450184417281,Ts_inner);
   PID angle_controller(6.79854249968418,8.48242460792782,0.519954888426499,Ts_inner);
+  Kalman_filter_pitch pitch_filter(0.001,0.003,0.03);
 
   dir bias;
 
@@ -95,10 +96,12 @@ void core0( void * pvParameters ){
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_260_HZ);
-  bias = bias_gyro(mpu);
+  bias = bias_gyro(&mpu);
 
   angle_controller.init();
   angle_rate_controller.init();
+  angle_controller.print_coefficients();
+  angle_rate_controller.print_coefficients();
 
   for(;;){
 
@@ -106,8 +109,8 @@ void core0( void * pvParameters ){
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
     unsigned long start_time = millis();
-    int pitch = atan2(a.acceleration.y,sqrt(a.acceleration.x*a.acceleration.x+a.acceleration.z*a.acceleration.z));
-
+    double pitch = atan2(a.acceleration.y,sqrt(a.acceleration.x*a.acceleration.x+a.acceleration.z*a.acceleration.z));
+    pitch = pitch_filter.filter(g.gyro.y - bias.y,pitch,Ts_inner);
 
     /* Angle Controler Desired angle 0 */
     double theta_rate_d = angle_controller.filter(pitch - 0);
@@ -118,14 +121,14 @@ void core0( void * pvParameters ){
     unlockVariable();
 
     unsigned long stop_time = millis();
-    if((start_time - stop_time)>Ts_inner){
+    if(1000000*(start_time - stop_time)>Ts_inner){
       while(1){
         Serial.println("Warning controller takes longer than Ts_inner!");
         delay(1000);
       }
     }
 
-    delay(Ts_inner - (start_time - stop_time));
+    delay(Ts_inner/1000 - 1000*(start_time - stop_time));
 
   } 
 }
@@ -133,7 +136,7 @@ void core0( void * pvParameters ){
 
 void core1( void * pvParameters ){
 
-  float f = 0 , w, acc_d;
+  float t , w = 0, acc_d, w0;
   float step = 2*PI/SPR;
   bool direction = HIGH;
   // Set the spinning direction counterclockwise:
@@ -150,28 +153,28 @@ void core1( void * pvParameters ){
 
     while(time>0){
 
-      float w0 = step*f; 
       /* change direction */
-      if(w0*w0 + 2*acc_d*step < 0){
+      if(w*w + 2*acc_d*step < 0){
         step = -step;
         direction = !direction;
         digitalWrite(dirPinR, direction);
         digitalWrite(dirPinL, direction);
       }
       /* work out the time between steps to achieve the correct acceleration */
-      w = sqrtf(w0*w0 + 2*acc_d*step);
-      f = acc_d/(w - w0);
-      time -= 1/f;
+      w0 = w; 
+      w = sqrtf(w*w + 2*acc_d*step);
+      t = (w - w0)/acc_d;
+      time -= t;
       /* step the motors */
       if(time > 0){
-        delayMicroseconds(1000000/(2*f));
+        delayMicroseconds(500000*t);
         digitalWrite(stepPinR, HIGH);
         digitalWrite(stepPinL, HIGH);
 
-        delayMicroseconds(1000000/(2*f));
+        delayMicroseconds(500000/t);
         digitalWrite(stepPinR, LOW);
         digitalWrite(stepPinL, LOW);
-      } 
+      }
     }
   }
 }
