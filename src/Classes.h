@@ -33,7 +33,7 @@ class PID {
         }
         // Get PID output
         double filter(double u){
-            double tmp;
+            double tmp;   
             tmp = (kd/ts)*x[1] - (kp + 2*(kd/ts))*x[0] + (kp + ki*ts + kd/ts)*u + y;
             if(sat < fabs(tmp)){
                 if(tmp>0){
@@ -94,7 +94,6 @@ class Kalman_filter_pitch {
             K[0] = P[0][0]/S;
             K[1] = P[1][0]/S;
             theta[0] += K[0]*y; 
-            theta[1] += K[1]*y;
             P[1][0] -= K[1]*P[0][0];
             P[1][1] -= K[1]*P[0][1];
             P[0][0] -= K[0]*P[0][0];
