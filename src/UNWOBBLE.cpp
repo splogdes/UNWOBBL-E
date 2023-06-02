@@ -6,12 +6,11 @@
 #include <cmath>
 #include "Classes.h"
 
-#define SPR 400.0
+#define SPR 6400.0
 #define dirPinR 12
 #define stepPinR 14
 #define dirPinL 27
 #define stepPinL 26
-#define Ts_outer 0.04
 #define Ts_inner 0.004
 
 struct dir{
@@ -29,18 +28,11 @@ void createSemaphore(){
     xSemaphoreGive( ( i2cSemaphore) );
 }
 
-// Lock the variable indefinietly. ( wait for it to be accessible )
-void lockVariable(){
-    xSemaphoreTake(i2cSemaphore, 100);
-}
-
-// give back the semaphore.
-void unlockVariable(){
-    xSemaphoreGive(i2cSemaphore);
-}
-
 TaskHandle_t Task1;
 TaskHandle_t Task2;
+
+double angle_acc_d = 0;
+double speed = 0;
 
 double angle_acc_d = 0;
 
@@ -81,12 +73,12 @@ void setup() {
 
 
 void core0( void * pvParameters ){
-  Serial.println(xPortGetCoreID());
+
   Adafruit_MPU6050 mpu;
 
-  //PID angle_rate_controller(0.5,0.5,0,Ts_inner);
-  PID angle_controller(1,1,0,Ts_inner);
+  PID angle_controller(5,0,0,Ts_inner);
   Kalman_filter_pitch pitch_filter(0.001,0.003,0.03);
+
   dir bias;
 
   if (!mpu.begin()) {
@@ -95,31 +87,32 @@ void core0( void * pvParameters ){
       delay(10);
     }
   }
-  Serial.println("MPU6050 Found!");
+
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_260_HZ);
+
   bias = bias_gyro(&mpu);
 
   angle_controller.init();
-  //angle_rate_controller.init();
-  angle_controller.print_coefficients();
-  //angle_rate_controller.print_coefficients();
+  //angle_controller.print_coefficients();
 
+  int count = 0;
   for(;;){
-
+    count++;
     /* Get new sensor events with the readings */
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
     unsigned long start_time = micros();
     double pitch = atan2(a.acceleration.y,sqrt(a.acceleration.x*a.acceleration.x+a.acceleration.z*a.acceleration.z));
-    pitch = pitch_filter.filter(g.gyro.x - bias.x,pitch, Ts_inner);
+    double kpitch = pitch_filter.filter(g.gyro.x - bias.x,pitch, Ts_inner);
     /* Angle Controler Desired angle 0 */
-    double tmp = angle_controller.filter(pitch - 0);
-    //double tmp = angle_rate_controller.filter(theta_rate_d - (g.gyro.x - bias.x));
-    //lockVariable();
+    double tmp = angle_controller.filter(kpitch - 0);
+
+    if (count %25 == 0){Serial.print("pitch:");Serial.print(pitch);Serial.print(" kpitch:");Serial.print(kpitch);Serial.print(" acc:");Serial.print(tmp);Serial.print(" speed:");Serial.println(speed);}
+
     angle_acc_d = tmp; //change value of the shared angle_acc_d
-    //unlockVariable();
+
 
     unsigned long stop_time = micros();
     if((stop_time - start_time)>1000000*Ts_inner){
@@ -130,14 +123,13 @@ void core0( void * pvParameters ){
     }
 
     delayMicroseconds(1000000*Ts_inner - (stop_time - start_time));
-
+    stop_time =  micros();
   } 
 }
 
 
 void core1( void * pvParameters ){
-  Serial.println(xPortGetCoreID());
-  int next = 1;
+  int next = 1,count = 0;
   double t = 1000;
   double w , d;
   double step = 2*(PI/SPR);
@@ -147,39 +139,28 @@ void core1( void * pvParameters ){
   double acc_d;
 
   for(;;){
-
-    //lockVariable();
-    acc_d = angle_acc_d; // read shared value 
-    //unlockVariable();
-    double time = Ts_outer;
-    while (abs(acc_d) < 0.001)
-    {
-      delay(0.04);
-      acc_d = angle_acc_d; // read shared value6
-    }
-    Serial.println(acc_d);
-
-    while(time>0){
-      double w0 = step/t;
-      /* change direction */
+    count++;
+    unsigned long start_time = micros();
+    double w0 = step/t;
+    speed = (step > 0 ? 1 : -1)*w0;
+    while(1){
+      acc_d = angle_acc_d; // read shared value 
       if(w0*w0 + 2*acc_d*step < 0){
         step = -step;
         direction = !direction;
         digitalWrite(dirPinR, direction);
         digitalWrite(dirPinL, !direction);
       }
-      /* work out the time between steps to achieve the correct acceleration */
-      w =  sqrtf(w0*w0 + 2*acc_d*step);
-      t = (w - w0)/acc_d;
-      /* step the motors */
-      d = (step > 0 ? 1 : -1)*t;
-      time -= d;
-      if(time > 0){
-        delayMicroseconds(1000000*d);
+      w =  sqrt(w0*w0 + 2*acc_d*step);
+      if(abs(acc_d)>0.0000001) t = (w - w0)/acc_d;
+      d = (step > 0 ? 1 : -1)*t*1000000;
+      unsigned long current_time = micros();
+      if((current_time - start_time) >= d){
         digitalWrite(stepPinR, next);
         digitalWrite(stepPinL, next);
         next = !next;
-      } 
+        break;
+      }
     }
   }
 }
