@@ -3,6 +3,7 @@
 
 class PID {
     private:
+        unsigned long T;
         double ki;
         double kp;
         double kd;
@@ -11,18 +12,16 @@ class PID {
         double x[2];
         double sat;
     public:
-        PID(double Kp,double Ki,double Kd,double Ts){
+        PID(double Kp,double Ki,double Kd){
             ki = Ki;
             kp = Kp;
             kd = Kd;
-            ts = Ts;
             sat = infinity();
         }
-        PID(double Kp,double Ki,double Kd,double Ts,double Saturation){
+        PID(double Kp,double Ki,double Kd,double Saturation){
             ki = Ki;
             kp = Kp;
             kd = Kd;
-            ts = Ts;
             sat = Saturation;
         }
         // Initiate values to 0
@@ -30,9 +29,12 @@ class PID {
             x[0] = 0;
             x[1] = 0;
             y = 0;
+            T = micros();
         }
         // Get PID output
         double filter(double u){
+            ts = double(micros()-T)/1000000;
+            T = micros();
             double tmp;   
             tmp = (kd/ts)*x[1] - (kp + 2*(kd/ts))*x[0] + (kp + ki*ts + kd/ts)*u + y;
             if(sat < fabs(tmp)){
@@ -50,18 +52,18 @@ class PID {
         }
         // Prints Coefficients
         void print_coefficients(){
-            Serial.print("Coefficients Ki: ");Serial.print(ki);Serial.print(", Kd: ");Serial.print(kd);Serial.print(", Kp: ");Serial.print(kp);Serial.print(", Ts: ");Serial.println(ts);
+            Serial.print(" Kp:");Serial.print(kp);Serial.print(" Ki:");Serial.print(ki);Serial.print(" Kd:");Serial.print(kd);Serial.print(" Ts_ms:");Serial.println(ts*1000000);
         }
-        void set_coefficients(double Kp,double Ki,double Kd,double Ts){
+        void set_coefficients(double Kp,double Ki,double Kd){
             ki = Ki;
             kp = Kp;
             kd = Kd;
-            ts = Ts;
         }
 };
 
 class Kalman_filter_pitch {
     private:
+        unsigned long T;
         double theta[2];
         double P[2][2];
         double y;
@@ -83,7 +85,12 @@ class Kalman_filter_pitch {
             Q[0] = Q_theta;
             Q[1] = Q_theta_rate;
         }
-        double filter(double angle_rate,double pitch,double delta_t){
+        void init(){
+            T = micros();
+        }
+        double filter(double angle_rate,double pitch){
+            double delta_t = double(micros() - T)/1000000;
+            T = micros();
             theta[0] += delta_t*(angle_rate-theta[1]);
             P[0][0] += delta_t*(delta_t*P[1][1]-P[0][1]-P[1][0]+Q[0]);
             P[0][1] -= delta_t*P[1][1];
@@ -94,6 +101,7 @@ class Kalman_filter_pitch {
             K[0] = P[0][0]/S;
             K[1] = P[1][0]/S;
             theta[0] += K[0]*y; 
+            theta[1] += K[1]*y; 
             P[1][0] -= K[1]*P[0][0];
             P[1][1] -= K[1]*P[0][1];
             P[0][0] -= K[0]*P[0][0];
