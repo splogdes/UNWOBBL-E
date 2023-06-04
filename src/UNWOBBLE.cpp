@@ -34,8 +34,6 @@ TaskHandle_t Task2;
 double angle_acc_d = 0;
 double speed = 0;
 
-double angle_acc_d = 0;
-
 /* To bias the gyro scope */
 dir bias_gyro(Adafruit_MPU6050 * mpu){
   sensors_event_t a, g, temp;
@@ -73,10 +71,11 @@ void setup() {
 
 
 void core0( void * pvParameters ){
-
   Adafruit_MPU6050 mpu;
 
-  PID angle_controller(5,0,0,Ts_inner);
+  PID angle_controller(8,2,0.2,Ts_inner);
+
+  double kp_inner = 250;
   Kalman_filter_pitch pitch_filter(0.001,0.003,0.03);
 
   dir bias;
@@ -87,7 +86,6 @@ void core0( void * pvParameters ){
       delay(10);
     }
   }
-
   mpu.setAccelerometerRange(MPU6050_RANGE_8_G);
   mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_260_HZ);
@@ -96,7 +94,6 @@ void core0( void * pvParameters ){
 
   angle_controller.init();
   //angle_controller.print_coefficients();
-
   int count = 0;
   for(;;){
     count++;
@@ -104,16 +101,17 @@ void core0( void * pvParameters ){
     sensors_event_t a, g, temp;
     mpu.getEvent(&a, &g, &temp);
     unsigned long start_time = micros();
-    double pitch = atan2(a.acceleration.y,sqrt(a.acceleration.x*a.acceleration.x+a.acceleration.z*a.acceleration.z));
-    double kpitch = pitch_filter.filter(g.gyro.x - bias.x,pitch, Ts_inner);
+    double pitch = atan2(a.acceleration.z,sqrt(a.acceleration.x*a.acceleration.x+a.acceleration.y*a.acceleration.y));
+    double kpitch = pitch_filter.filter(g.gyro.y - bias.y,pitch, Ts_inner);
     /* Angle Controler Desired angle 0 */
-    double tmp = angle_controller.filter(kpitch - 0);
+    //double pitch_d =  
+    double tmp = angle_controller.filter(0-(kpitch-0.42));
+    //double tmp = angle_rate_controller.filter(theta_rate_d - (g.gyro.x - bias.x));
+    if (count %25 == 0){Serial.print("pitch:");Serial.print(57.3*(pitch-0.42));Serial.print(" kpitch:");Serial.print(57.3*(kpitch-0.42));Serial.print(" acc:");Serial.print(tmp);Serial.print(" speed:");Serial.print(speed);Serial.print(" gyro:");Serial.println(g.gyro.y - bias.y);}
 
-    if (count %25 == 0){Serial.print("pitch:");Serial.print(pitch);Serial.print(" kpitch:");Serial.print(kpitch);Serial.print(" acc:");Serial.print(tmp);Serial.print(" speed:");Serial.println(speed);}
+    angle_acc_d = kp_inner*(tmp - (g.gyro.y - bias.y)); //change value of the shared angle_acc_d inner loop 
 
-    angle_acc_d = tmp; //change value of the shared angle_acc_d
-
-
+    //try tune by changing voltatge
     unsigned long stop_time = micros();
     if((stop_time - start_time)>1000000*Ts_inner){
       while(1){
@@ -124,6 +122,7 @@ void core0( void * pvParameters ){
 
     delayMicroseconds(1000000*Ts_inner - (stop_time - start_time));
     stop_time =  micros();
+    //Serial.println(stop_time - start_time);
   } 
 }
 
