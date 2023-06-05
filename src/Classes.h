@@ -59,6 +59,12 @@ class PID {
             kp = Kp;
             kd = Kd;
         }
+        void set_coefficients(double Kp,double Ki,double Kd,double Saturation){
+            ki = Ki;
+            kp = Kp;
+            kd = Kd;
+            sat = Saturation;
+        }
 };
 
 class Kalman_filter_pitch {

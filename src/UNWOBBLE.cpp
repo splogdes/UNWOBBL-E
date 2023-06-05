@@ -6,12 +6,17 @@
 #include <cmath>
 #include "Classes.h"
 
+
+// 0.1 4 30 -0.004 -0.003 0 30 140 12 0.1
+
 #define SPR 6400.0
-#define dirPinR 12
-#define stepPinR 14
+#define dirPinR 25
+#define stepPinR 33
 #define dirPinL 27
 #define stepPinL 26
 #define Ts_inner 0.01
+#define Dw 0.067
+
 
 struct dir{
   double x;
@@ -77,9 +82,11 @@ void core0( void * pvParameters ){
   Adafruit_MPU6050 mpu;
 
   PID angle_rate_controller(100,10,0);
-  double kp_theta = 20;
-  PID velocity_controller(1,1,0);
-  double kp_pos = 1;
+  double kp_theta = 30;
+  double angle_sat = 100; 
+  PID velocity_controller(0,0,0,angle_sat);
+  double kp_pos = 0;
+  double sat_velocity = 0.02;
   Kalman_filter_pitch pitch_filter(0.001,0.003,0.03);
 
   dir bias;
@@ -98,26 +105,36 @@ void core0( void * pvParameters ){
   bias = bias_gyro(&mpu);
 
   int count = 0;
-  double nkp,nki,nkd;
+  double akp,aki,akd,vkp,vki,vkd;
   angle_rate_controller.init();
   pitch_filter.init();
+  double pos_d = 0.2;
   for(;;){
     unsigned long start_time = micros();
     if(Serial.available()){
+      Serial.println("");
       angle_acc_d = 0;
+      position = 0;
       rst = 1;
+      angle_sat = Serial.parseFloat();
+      sat_velocity = Serial.parseFloat();
       kp_pos = Serial.parseFloat();
-      nkp = Serial.parseFloat();
-      nki = Serial.parseFloat();
-      nkd = Serial.parseFloat();
-      Serial.print("Kp_pos:");Serial.print(kp_pos);
-      velocity_controller.set_coefficients(nkp,nki,nkd);
+      vkp = Serial.parseFloat();
+      vki = Serial.parseFloat();
+      vkd = Serial.parseFloat();
+      kp_theta = Serial.parseFloat();
+      akp = Serial.parseFloat();
+      aki = Serial.parseFloat();
+      akd = Serial.parseFloat();
+      velocity_controller.set_coefficients(vkp,vki,vkd,angle_sat);
+      angle_rate_controller.set_coefficients(akp,aki,akd);
       velocity_controller.init();
       angle_rate_controller.init();
       pitch_filter.init();
-      angle_rate_controller.print_coefficients();
-      Serial.print("Kp_theta:");Serial.print(kp_theta);
+      Serial.print("position Kp_pos:");Serial.print(kp_pos*1000000);
       velocity_controller.print_coefficients();
+      Serial.print("angle Kp_theta:");Serial.print(kp_theta);
+      angle_rate_controller.print_coefficients();
     }
     count++;
     /* Get new sensor events with the readings */
@@ -126,12 +143,20 @@ void core0( void * pvParameters ){
     double pitch = atan2(a.acceleration.z,sqrt(a.acceleration.x*a.acceleration.x+a.acceleration.y*a.acceleration.y));
     double kpitch = pitch_filter.filter(g.gyro.y - bias.y,pitch);
     /* Angle Controler Desired angle 0 */
-    if (count %25 == 0){Serial.print("position:");Serial.print(position);Serial.print(" kpitch:");Serial.print(57.3*(kpitch-0.42));Serial.print(" acc:");Serial.print(angle_acc_d);Serial.print(" speed:");Serial.println(speed);}
-    double tmp = kp_pos*(0 - position);
-    tmp = velocity_controller.filter(tmp - speed);
-    tmp = kp_theta*(0-(kpitch-0.42));
-    angle_acc_d = angle_rate_controller.filter(tmp - (g.gyro.y - bias.y)); //change value of the shared angle_acc_d inner loop 
+    double velocity_d = kp_pos*(pos_d - PI*Dw*double(position)/SPR);
+    if(sat_velocity < fabs(velocity_d)){
+      if(velocity_d>0){
+        velocity_d = sat_velocity;
+      }else{
+        velocity_d = -sat_velocity;
+      }
+    }
+    double pitch_d = velocity_controller.filter(velocity_d - speed);
+    double angle_rate_d = kp_theta*(pitch_d-(kpitch-0.447));
+    angle_acc_d = angle_rate_controller.filter(angle_rate_d - (g.gyro.y - bias.y)); //change value of the shared angle_acc_d inner loop 
     unsigned long stop_time = micros();
+    if (count %25 == 0){Serial.print("pos_d:");Serial.print(pos_d);Serial.print(" velocity_d:");Serial.print(velocity_d);Serial.print(" pitch_d:");Serial.print(pitch_d);Serial.print(" position:");Serial.print(PI*Dw*double(position)/SPR);Serial.print(" kpitch:");Serial.print(57.3*(kpitch-0.447));Serial.print(" acc:");Serial.print(angle_acc_d);Serial.print(" speed:");Serial.println(speed);}
+    if (count % 4000 == 0) pos_d *= -1;
     //Serial.println(stop_time - start_time);
   } 
 }
