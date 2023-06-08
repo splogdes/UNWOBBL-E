@@ -83,12 +83,13 @@ void core0( void * pvParameters ){
 
   PID angle_rate_controller(140,12,0.1);
   double kp_theta = 30;
-  double angle_sat = 0.1; 
+  double angle_sat = 0.07; 
   PID velocity_controller(-0.004,-0.003,0,angle_sat);
   double kp_pos = 30;
-  double sat_velocity = 4;
-  double kp_yaw = 2000;
-  PID yaw_controller(2,0.6,0.005,20);
+  double sat_velocity = 2;
+  double kp_yaw = 200;
+  double yaw_rate_sat = 0.5;
+  PID yaw_controller(150,15,0.1);
   Kalman_filter_pitch pitch_filter(0.001,0.003,0.03);
 
   dir bias;
@@ -109,30 +110,23 @@ void core0( void * pvParameters ){
   int count = 0;
   double akp,aki,akd,vkp,vki,vkd;
   angle_rate_controller.init();
+  velocity_controller.init();
   pitch_filter.init();
   yaw_controller.init();
-  double pos_d = 0.2;
+  double pos_d = 0;
   double goal = 0;
   for(;;){
     unsigned long start_time = micros();
     if(Serial.available()){
       Serial.println("");
-      angle_sat = Serial.parseFloat();
-      sat_velocity = Serial.parseFloat();
-      kp_pos = Serial.parseFloat();
+      yaw_rate_sat = Serial.parseFloat();
+      kp_yaw = Serial.parseFloat();
       vkp = Serial.parseFloat();
       vki = Serial.parseFloat();
       vkd = Serial.parseFloat();
-      kp_theta = Serial.parseFloat();
-      akp = Serial.parseFloat();
-      aki = Serial.parseFloat();
-      akd = Serial.parseFloat();
-      velocity_controller.set_coefficients(vkp,vki,vkd,angle_sat);
-      angle_rate_controller.set_coefficients(akp,aki,akd);
-      Serial.print("position Kp_pos:");Serial.print(kp_pos*1000000);
-      velocity_controller.print_coefficients();
-      Serial.print("angle Kp_theta:");Serial.print(kp_theta);
-      angle_rate_controller.print_coefficients();
+      yaw_controller.set_coefficients(vkp,vki,vkd);
+      Serial.print("Yaw Kp_yaw:");Serial.print(kp_yaw);
+      yaw_controller.print_coefficients();
       angle_acc_d = 0;
       Lposition = 0;
       Rposition = 0;
@@ -161,14 +155,24 @@ void core0( void * pvParameters ){
     double angle_rate_d = kp_theta*(pitch_d-(kpitch-0.447));
     angle_acc_d = angle_rate_controller.filter(angle_rate_d - (g.gyro.y - bias.y)); //change value of the shared angle_acc_d inner loop 
     /* Control System for turning */
-    double yaw = 2*PI*(Rposition-Lposition)*Dw/(SPR*Dr);
+    double yaw = PI*(Rposition-Lposition)*Dw/(SPR*Dr);
+
     double yaw_rate_d = kp_yaw*(goal - yaw);
+    if(yaw_rate_sat < fabs(yaw_rate_d)){
+      if(yaw_rate_d>0){
+        yaw_rate_d = yaw_rate_sat;
+      }else{
+        yaw_rate_d = -yaw_rate_sat;
+      }
+    }
     acc_yaw_d = yaw_controller.filter(yaw_rate_d - Dw*(Rspeed-Lspeed)/2);
 
     unsigned long stop_time = micros();
-    if (count %25 == 0){Serial.print("position:");Serial.print(position);Serial.print(" position_diff:");Serial.print(Lposition-Rposition);Serial.print(" yaw:");Serial.print(yaw);Serial.print(" acc_yaw_d:");Serial.print(acc_yaw_d);Serial.print(" angle_acc_d:");Serial.println(angle_acc_d);}
-    if (count % 4000 == 0) pos_d *= -1;
-    //if (count % 5000 == 0) goal *= -1;
+    if (count %25 == 0){Serial.print("goal:");Serial.print(goal);Serial.print(" position:");Serial.print(position);Serial.print(" position_diff:");Serial.print(Lposition-Rposition);Serial.print(" yaw:");Serial.print(yaw);Serial.print(" acc_yaw_d:");Serial.print(acc_yaw_d);Serial.print(" angle_acc_d:");Serial.println(angle_acc_d);}
+    //if (count %25 == 0){Serial.print("pos_d:");Serial.print(pos_d);Serial.print(" velocity_d:");Serial.print(velocity_d);Serial.print(" pitch_d:");Serial.print(pitch_d);Serial.print(" position:");Serial.print(position);Serial.print(" kpitch:");Serial.print(57.3*(kpitch-0.447));Serial.print(" acc:");Serial.print(angle_acc_d);Serial.print(" speed:");Serial.println((Lspeed+Rspeed)/2);}
+    if (count % 8000 == 0) pos_d += 0.1;
+    if (((count - 4000) % 8000 == 0) && count > 4000) goal += PI/2;
+    //if (count % 4000 == 0 ) goal *= -1;
     //Serial.println(stop_time - start_time);
   } 
 }
@@ -183,7 +187,7 @@ void core1( void * pvParameters ){
   digitalWrite(RdirPin, Rdirection);
   digitalWrite(LdirPin, Ldirection);
   double Racc_d,Lacc_d;
-
+  bool R = 0, L = 0; 
   for(;;){
     unsigned long Lstart_time = micros(), Rstart_time = micros();
     double Lw0 = Lstep/Lt, Rw0 = Rstep/Rt;
@@ -209,22 +213,41 @@ void core1( void * pvParameters ){
       Ld = (Lstep > 0 ? 1 : -1)*Lt*1000000;
       Rd = (Rstep > 0 ? 1 : -1)*Rt*1000000;
       unsigned long current_time = micros();
-      if((current_time - Lstart_time) >= Ld){
-        Lposition += (Lstep > 0 ? -1 : 1);
+      if((current_time - Lstart_time) >= Ld) L = 1;
+      if((current_time - Rstart_time) >= Rd) R = 1;
+      if(L&&R){
         digitalWrite(LstepPin, Lnext);
+        digitalWrite(RstepPin, Rnext);
+        Rposition += (Rstep > 0 ? 1 : -1);
+        Lposition += (Lstep > 0 ? -1 : 1);
+        Rnext = !Rnext;
+        Lnext = !Lnext; 
+        Lstart_time = micros();
+        Rstart_time = Lstart_time;
+        Lw0 = Lstep/Lt;
+        Rw0 = Rstep/Rt;
+        Lspeed = (Lstep > 0 ? -1 : 1)*Lw0;
+        Rspeed = (Rstep > 0 ? 1 : -1)*Rw0;
+        L = 0;
+        R = 0;
+      }
+      else if(L){
+        digitalWrite(LstepPin, Lnext);
+        Lposition += (Lstep > 0 ? -1 : 1);
         Lnext = !Lnext;
         Lstart_time = micros();
         Lw0 = Lstep/Lt;
-        Lspeed = (Lstep > 0 ? 1 : -1)*Lw0;
+        Lspeed = (Lstep > 0 ? -1 : 1)*Lw0;
+        L = 0;
       }
-      current_time = micros();
-      if((current_time - Rstart_time) >= Rd){
-        Rposition += (Rstep > 0 ? 1 : -1);
+      else if(R){
         digitalWrite(RstepPin, Rnext);
+        Rposition += (Rstep > 0 ? 1 : -1);
         Rnext = !Rnext;
         Rstart_time = micros();
         Rw0 = Rstep/Rt;
         Rspeed = (Rstep > 0 ? 1 : -1)*Rw0;
+        R = 0;
       }
       if(rst){
         rst = 0;
