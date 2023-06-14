@@ -7,13 +7,12 @@
 #include "Classes.h"
 
 #define SPR 6400.0
-#define RdirPin 25
-#define RstepPin 33
-#define LdirPin 27
-#define LstepPin 26
-#define Ts_inner 0.01
-#define Dw 0.0665
-#define Dr 0.14
+#define RdirPin 4
+#define RstepPin 16
+#define LdirPin 15
+#define LstepPin 2
+#define Dw 0.0816
+#define Dr 0.13
 
 // 0.1 4 30 -0.004 -0.003 0 30 140 12 0.1
 
@@ -81,15 +80,15 @@ void core0( void * pvParameters ){
 
   Adafruit_MPU6050 mpu;
 
-  PID angle_rate_controller(140,12,0.1);
-  double kp_theta = 30;
-  double angle_sat = 0.07; 
-  PID velocity_controller(-0.004,-0.003,0,angle_sat);
+  PID angle_rate_controller(60,5,0.01);
+  double kp_theta = 41;
+  double angle_sat = 0.03; 
+  PID velocity_controller(-0.003,-0.001,-0.00001,angle_sat);
   double kp_pos = 30;
   double sat_velocity = 2;
-  double kp_yaw = 200;
-  double yaw_rate_sat = 0.5;
-  PID yaw_controller(150,15,0.1);
+  double kp_yaw = 2;
+  double yaw_rate_sat = 0.2;
+  PID yaw_controller(120,20,0.005);
   Kalman_filter_pitch pitch_filter(0.001,0.003,0.03);
 
   dir bias;
@@ -119,21 +118,23 @@ void core0( void * pvParameters ){
     unsigned long start_time = micros();
     if(Serial.available()){
       Serial.println("");
-      yaw_rate_sat = Serial.parseFloat();
-      kp_yaw = Serial.parseFloat();
+      angle_sat = Serial.parseFloat();
+      sat_velocity = Serial.parseFloat();
+      kp_pos = Serial.parseFloat();
       vkp = Serial.parseFloat();
       vki = Serial.parseFloat();
       vkd = Serial.parseFloat();
-      yaw_controller.set_coefficients(vkp,vki,vkd);
-      Serial.print("Yaw Kp_yaw:");Serial.print(kp_yaw);
-      yaw_controller.print_coefficients();
+      velocity_controller.set_coefficients(vkp,vki,vkd,angle_sat);
       angle_acc_d = 0;
       Lposition = 0;
       Rposition = 0;
-      pitch_filter.init();
       velocity_controller.init();
       angle_rate_controller.init();
+      yaw_controller.init();
       rst = 1;
+      count = 0;
+      goal = 0;
+      pos_d = 0;
     }
     count++;
     /* Get new sensor events with the readings */
@@ -152,7 +153,7 @@ void core0( void * pvParameters ){
       }
     }
     double pitch_d = velocity_controller.filter(velocity_d - (Lspeed+Rspeed)/2);
-    double angle_rate_d = kp_theta*(pitch_d-(kpitch-0.447));
+    double angle_rate_d = kp_theta*(pitch_d-(kpitch-0.05));
     angle_acc_d = angle_rate_controller.filter(angle_rate_d - (g.gyro.y - bias.y)); //change value of the shared angle_acc_d inner loop 
     /* Control System for turning */
     double yaw = PI*(Rposition-Lposition)*Dw/(SPR*Dr);
@@ -168,11 +169,12 @@ void core0( void * pvParameters ){
     acc_yaw_d = yaw_controller.filter(yaw_rate_d - Dw*(Rspeed-Lspeed)/2);
 
     unsigned long stop_time = micros();
-    if (count %25 == 0){Serial.print("goal:");Serial.print(goal);Serial.print(" position:");Serial.print(position);Serial.print(" position_diff:");Serial.print(Lposition-Rposition);Serial.print(" yaw:");Serial.print(yaw);Serial.print(" acc_yaw_d:");Serial.print(acc_yaw_d);Serial.print(" angle_acc_d:");Serial.println(angle_acc_d);}
-    //if (count %25 == 0){Serial.print("pos_d:");Serial.print(pos_d);Serial.print(" velocity_d:");Serial.print(velocity_d);Serial.print(" pitch_d:");Serial.print(pitch_d);Serial.print(" position:");Serial.print(position);Serial.print(" kpitch:");Serial.print(57.3*(kpitch-0.447));Serial.print(" acc:");Serial.print(angle_acc_d);Serial.print(" speed:");Serial.println((Lspeed+Rspeed)/2);}
-    if (count % 8000 == 0) pos_d += 0.1;
-    if (((count - 4000) % 8000 == 0) && count > 4000) goal += PI/2;
-    //if (count % 4000 == 0 ) goal *= -1;
+    if (count %25 == 0){Serial.print("goal:");Serial.print(goal);Serial.print(" position:");Serial.print(position);Serial.print(" position_diff:");Serial.print(Lposition-Rposition);Serial.print(" yaw:");Serial.print(yaw);Serial.print(" acc_yaw_d:");Serial.print(acc_yaw_d);Serial.print(" angle_acc_d:");Serial.print(angle_acc_d);Serial.print(" speedL:");Serial.print(Lspeed);Serial.print(" speedR:");Serial.println(Rspeed);}
+    //if (count %25 == 0){Serial.print("pos_d:");Serial.print(pos_d);Serial.print(" velocity_d:");Serial.print(velocity_d);Serial.print(" pitch_d:");Serial.print(pitch_d);Serial.print(" position:");Serial.print(position);Serial.print(" kpitch:");Serial.print(57.3*(kpitch-0.05));Serial.print(" acc:");Serial.print(angle_acc_d);Serial.print(" speed:");Serial.println((Lspeed+Rspeed)/2);}
+    //if (count % 8000 == 0) pos_d += 0.1;
+    //if (count % 8000 == 0) goal = 0;
+    if ((count-8000) % 16000 == 0 && count >= 8000) pos_d += 0.4;
+    if (count % 16000 == 0 ) goal += PI/2;
     //Serial.println(stop_time - start_time);
   } 
 }
@@ -191,7 +193,7 @@ void core1( void * pvParameters ){
   for(;;){
     unsigned long Lstart_time = micros(), Rstart_time = micros();
     double Lw0 = Lstep/Lt, Rw0 = Rstep/Rt;
-    Lspeed = (Lstep > 0 ? 1 : -1)*Lw0;
+    Lspeed = (Lstep > 0 ? -1 : 1)*Lw0;
     Rspeed = (Rstep > 0 ? 1 : -1)*Rw0;
     while(1){
       Lacc_d = - angle_acc_d + acc_yaw_d; // read shared value 
@@ -215,23 +217,7 @@ void core1( void * pvParameters ){
       unsigned long current_time = micros();
       if((current_time - Lstart_time) >= Ld) L = 1;
       if((current_time - Rstart_time) >= Rd) R = 1;
-      if(L&&R){
-        digitalWrite(LstepPin, Lnext);
-        digitalWrite(RstepPin, Rnext);
-        Rposition += (Rstep > 0 ? 1 : -1);
-        Lposition += (Lstep > 0 ? -1 : 1);
-        Rnext = !Rnext;
-        Lnext = !Lnext; 
-        Lstart_time = micros();
-        Rstart_time = Lstart_time;
-        Lw0 = Lstep/Lt;
-        Rw0 = Rstep/Rt;
-        Lspeed = (Lstep > 0 ? -1 : 1)*Lw0;
-        Rspeed = (Rstep > 0 ? 1 : -1)*Rw0;
-        L = 0;
-        R = 0;
-      }
-      else if(L){
+      if(L){
         digitalWrite(LstepPin, Lnext);
         Lposition += (Lstep > 0 ? -1 : 1);
         Lnext = !Lnext;
@@ -240,7 +226,7 @@ void core1( void * pvParameters ){
         Lspeed = (Lstep > 0 ? -1 : 1)*Lw0;
         L = 0;
       }
-      else if(R){
+      if(R){
         digitalWrite(RstepPin, Rnext);
         Rposition += (Rstep > 0 ? 1 : -1);
         Rnext = !Rnext;
