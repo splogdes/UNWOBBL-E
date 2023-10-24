@@ -16,8 +16,6 @@
 #define Dr 0.167
 #define BUFFER_SIZE 32
 
-// 0.1 4 30 -0.004 -0.003 0 30 140 12 0.1
-
 struct dir{
   double x;
   double y;
@@ -101,12 +99,11 @@ void core0( void * pvParameters ){
 
   if (!mpu.begin()) {
     Serial.println("Failed to find MPU6050 chip");
-    // while (1) {
-    delay(10000);
-    // }
+    while (1) {
+      delay(10000);
+    }
   }
 
-  /* corey's bit */
   slave.setDataMode(SPI_MODE0);
   slave.begin(VSPI);
   StaticJsonDocument<200> doc;
@@ -152,76 +149,12 @@ void core0( void * pvParameters ){
       velocity_controller.set_coefficients(akp,aki,akd,angle_sat);
       count = 0;
     }
-    // if(flag == 0b11){
-    //   switch(instruction){
-    //     case 0: pos_d = 1; break;
-    //     case 1: goal = -1.9; break;
-    //     case 2: pos_d = 2; break;
-    //     case 3: pos_d = 1; break;
-    //     case 4: goal = 0; break;
-    //     case 5: pos_d = 0; break;
-    //     case 6: goal = 2*PI; break;
-    //     case 7: instruction = -1; break;
-    //   }
-    //   instruction++;
-    // }
-
-
-    // if(flag == 0b11 && count > 5000){
-    //   switch(instruction){
-    //     case 0: yaw_rate_sat = 0.1; break;
-    //     case 1: goal = PI/4; break;
-    //     case 2: goal = 0; break;
-    //     case 3: yaw_rate_sat = 0.05; break;
-    //     case 4: goal = PI/4; break;
-    //     case 5: goal = 0; break;
-    //     case 6: yaw_rate_sat = 0.025; break;
-    //     case 7: goal = PI/4; break;
-    //     case 8: goal = 0; break;
-    //     case 9: instruction = -1; break;
-    //   }
-    //   instruction++;
-    // }
-
     /* Work out position */
     current_pos = position;
     current_yaw = yaw;
     X += (current_pos-last_pos)*cos(current_yaw);
     Y += (current_pos-last_pos)*sin(current_yaw);
     last_pos = current_pos;
-
-    if(Serial.available()){
-      Serial.println("");
-      angle_sat = Serial.parseFloat();
-      sat_velocity = Serial.parseFloat();
-      // yaw_rate_sat = Serial.parseFloat();
-      kp_pos = Serial.parseFloat();
-      akp = Serial.parseFloat();
-      aki = Serial.parseFloat();
-      akd = Serial.parseFloat();
-      //kp_theta = Serial.parseFloat();
-      // vkp = Serial.parseFloat();
-      // vki = Serial.parseFloat();
-      // vkd = Serial.parseFloat();
-      // kp_yaw = Serial.parseFloat();
-      // pkp = Serial.parseFloat();
-      // pki = Serial.parseFloat();
-      // pkd = Serial.parseFloat();
-      velocity_controller.set_coefficients(0,0,0);
-      // angle_rate_controller.set_coefficients(vkp,vki,vkd);
-      // yaw_controller.set_coefficients(pkp,pki,pkd);
-      angle_acc_d = 0;
-      Lposition = 0;
-      Rposition = 0;
-      velocity_controller.init();
-      angle_rate_controller.init();
-      yaw_controller.init();
-      rst = 1;
-      count = 0;
-      goal = 0;
-      pos_d = 0;
-      count2 = 0;
-    }
     count++;
     /* Get new sensor events with the readings */
     sensors_event_t a, g, temp;
@@ -260,37 +193,12 @@ void core0( void * pvParameters ){
     }
     acc_yaw_d = yaw_controller.filter(yaw_rate_d - Dw*(Rspeed-Lspeed)/2);
 
-    //if (count %25 == 0){Serial.print("goal:");Serial.print(goal);Serial.print(" position:");Serial.print(position);Serial.print(" position_diff:");Serial.print(Lposition-Rposition);Serial.print(" yaw:");Serial.print(yaw);Serial.print(" acc_yaw_d:");Serial.print(acc_yaw_d);Serial.print(" angle_acc_d:");Serial.print(angle_acc_d);Serial.print(" flag:");Serial.println(flag);}
-    if (count %25 == 0){Serial.print("pos_d:");Serial.print(pos_d);Serial.print(" goal:");Serial.print(goal);Serial.print(" speed_d:");Serial.print(velocity_d);Serial.print(" position:");Serial.print(position);Serial.print(" speed:");Serial.print(filtered_speed);Serial.print(" speed??:");Serial.print((Lspeed+Rspeed)/2-2.5*(g.gyro.x - pitch_filter.get_bias()));/*Serial.print(" acc:");Serial.print(angle_acc_d);*/Serial.print(" gyro:");Serial.println(2.5*(g.gyro.x - pitch_filter.get_bias()));}
-
-    /* Test Stuff */
     if (count == 1000){
       Lposition = 0;
       Rposition = 0;
       X = 0;
       Y = 0;
     }
-    //if (((count-4000)%8000 == 0)  && (count >= 4000)) pos_d = 0.5;
-    //if (count % 8000 == 0) pos_d = -0.5;
-
-    //if (count % 4000 == 0) goal *= -1;
-    // if ((count-8000) % 16000 == 0 && count >= 8000) pos_d += 0.45;
-    // if (count % 16000 == 0 ) goal += PI/4;
-    // if ((count-8000) % 16000 == 0 && count >= 8000) pos_d += 1;
-    // if ((count-8000) % 16000 == 0 && count >= 8000) pos_d -= 1;
-    // if (count % 16000 == 0 ) goal -= PI/4;
-    // if ((count-8000) % 16000 == 0 && count >= 8000) pos_d -= 0.45;
-
-    /* Bit of maze */
-    // int current = count % 50000;
-    // if(current < 2000) pos_d = 0;
-    // else if(current < 10000) pos_d = 0.45;
-    // else if(current < 14000) goal = PI/4;
-    // else if(current < 26000) pos_d = 1.45;
-    // else if(current < 38000) pos_d = 0.45; 
-    // else if(current < 42000) goal = 0;
-    // else if(current < 50000) pos_d = 0; 
-    //Serial.println(stop_time - start_time);
 
     if(fabs(position-pos_d) < 0.05 ){
       if(micros() - current_time > 3000000){
@@ -321,7 +229,7 @@ void core0( void * pvParameters ){
       DeserializationError error = deserializeJson(doc, json);
       error_rate = 0.9*error_rate + (error ? 0.1 : 0);
       if(!error){
-        //Serial.println(json);
+        Serial.println(json);
         pos_d = doc["SR"].as<float>();
         goal = doc["STheta"].as<float>();
       }
@@ -368,22 +276,22 @@ void core1( void * pvParameters ){
       unsigned long current_time = micros();
       if((current_time - Lstart_time) >= Ld) L = 1;
       if((current_time - Rstart_time) >= Rd) R = 1;
-      // if(L&&R){
-      //   digitalWrite(LstepPin, Lnext);
-      //   digitalWrite(RstepPin, Rnext);
-      //   Rposition += (Rstep > 0 ? 1 : -1);
-      //   Lposition += (Lstep > 0 ? -1 : 1);
-      //   Rnext = !Rnext;
-      //   Lnext = !Lnext; 
-      //   Lstart_time = micros();
-      //   Rstart_time = Lstart_time;
-      //   Lw0 = Lstep/Lt;
-      //   Rw0 = Rstep/Rt;
-      //   Lspeed = (Lstep > 0 ? -1 : 1)*Lw0;
-      //   Rspeed = (Rstep > 0 ? 1 : -1)*Rw0;
-      //   L = 0;
-      //   R = 0;
-      // }
+      if(L&&R){
+        digitalWrite(LstepPin, Lnext);
+        digitalWrite(RstepPin, Rnext);
+        Rposition += (Rstep > 0 ? 1 : -1);
+        Lposition += (Lstep > 0 ? -1 : 1);
+        Rnext = !Rnext;
+        Lnext = !Lnext; 
+        Lstart_time = micros();
+        Rstart_time = Lstart_time;
+        Lw0 = Lstep/Lt;
+        Rw0 = Rstep/Rt;
+        Lspeed = (Lstep > 0 ? -1 : 1)*Lw0;
+        Rspeed = (Rstep > 0 ? 1 : -1)*Rw0;
+        L = 0;
+        R = 0;
+      }
       if(L){
         digitalWrite(LstepPin, Lnext);
         Lposition += (Lstep > 0 ? -1 : 1);
